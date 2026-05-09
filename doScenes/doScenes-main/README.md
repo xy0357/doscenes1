@@ -1,0 +1,65 @@
+﻿# doScenes-main (Formal Edition)
+
+面向 doScenes challenge 的正式工程化训练与评估仓库。
+
+## 目标指标
+
+- ADE (越小越好)
+- FDE (越小越好)
+- Delta ADE = ADE_baseline - ADE_instruction (越大越好)
+
+## 工程结构
+
+- `src/doscenes/`: 业务代码（数据、模型、训练、评估、CLI）
+- `configs/`: 配置文件
+- `tests/`: 快速测试
+- `artifacts/`: checkpoint、报告、submission 输出
+- `docs/`: 说明文档
+
+## 安装
+
+```powershell
+pip install -r requirements.txt
+pip install -e .
+```
+
+## 路径配置
+
+编辑 `paths.txt`:
+
+```text
+NUSCENES_ROOT=E:/workplace/doScenes
+DOSCENES_ANNOTATIONS=E:/workplace/doScenes/doScenes-main/Annotations
+```
+
+## 常用命令
+
+训练：
+
+```powershell
+python -m doscenes train --config configs/default.json
+```
+
+instruction 评估：
+
+```powershell
+python -m doscenes eval --config configs/default.json --checkpoint artifacts/checkpoints/baseline_best.pth --output artifacts/experiments/eval_instruction.json
+```
+
+baseline 评估（忽略文本）：
+
+```powershell
+python -m doscenes eval --config configs/default.json --checkpoint artifacts/checkpoints/baseline_best.pth --ignore-text --output artifacts/experiments/eval_baseline.json
+```
+
+计算 Delta ADE：
+
+```powershell
+python -m doscenes compare --baseline artifacts/experiments/eval_baseline.json --instruction artifacts/experiments/eval_instruction.json --output artifacts/experiments/delta_report.json
+```
+
+导出 submission：
+
+```powershell
+python -m doscenes export-submission --config configs/default.json --checkpoint artifacts/checkpoints/baseline_best.pth --output artifacts/submissions/submission.csv
+```

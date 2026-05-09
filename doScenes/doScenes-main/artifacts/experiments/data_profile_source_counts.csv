@@ -1,0 +1,13 @@
+source_file,rows,empty_instruction_rows,empty_instruction_ratio
+doScenesAnnotations - Annotator 1.csv,703,422,0.6002844950213371
+doScenesAnnotations - Annotator 10.csv,150,73,0.4866666666666667
+doScenesAnnotations - Annotator 11.csv,150,61,0.4066666666666667
+doScenesAnnotations - Annotator 12.csv,150,44,0.29333333333333333
+doScenesAnnotations - Annotator 2.csv,563,263,0.46714031971580816
+doScenesAnnotations - Annotator 3.csv,613,201,0.3278955954323002
+doScenesAnnotations - Annotator 4.csv,741,450,0.6072874493927125
+doScenesAnnotations - Annotator 5.csv,955,425,0.44502617801047123
+doScenesAnnotations - Annotator 6.csv,331,188,0.56797583081571
+doScenesAnnotations - Annotator 7.csv,149,56,0.37583892617449666
+doScenesAnnotations - Annotator 8.csv,73,17,0.2328767123287671
+doScenesAnnotations - Annotator 9.csv,151,79,0.5231788079470199

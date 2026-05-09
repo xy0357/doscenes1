@@ -1,0 +1,2 @@
+NUSCENES_ROOT=E:/workplace/doScenes
+DOSCENES_ANNOTATIONS=E:/workplace/doScenes/doScenes-main/Annotations

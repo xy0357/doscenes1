@@ -1,0 +1,30 @@
+{
+  "overall": {
+    "count": 10431,
+    "ade_instruction": 0.34144940642244825,
+    "fde_instruction": 0.8161542044530912,
+    "ade_baseline": 0.37176358166593865,
+    "fde_baseline": 0.8129906804837352,
+    "delta_ade": 0.030314175243490393,
+    "delta_fde": -0.0031635239693559303
+  },
+  "has_instruction": {
+    "count": 5680,
+    "ade_instruction": 0.38326745092521197,
+    "fde_instruction": 0.9244014118942366,
+    "ade_baseline": 0.418197922817838,
+    "fde_baseline": 0.9282172777004619,
+    "delta_ade": 0.03493047189262605,
+    "delta_fde": 0.0038158658062252826
+  },
+  "empty_instruction": {
+    "count": 4751,
+    "ade_instruction": 0.2914543542701228,
+    "fde_instruction": 0.6867405782132036,
+    "ade_baseline": 0.3162495724588689,
+    "fde_baseline": 0.6752329300751883,
+    "delta_ade": 0.024795218188746138,
+    "delta_fde": -0.011507648138015303
+  },
+  "sample_count": 10431
+}

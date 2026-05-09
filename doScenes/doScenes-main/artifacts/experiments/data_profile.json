@@ -1,0 +1,7 @@
+{
+  "raw_rows": 4729,
+  "empty_instruction_rows": 2279,
+  "non_empty_instruction_rows": 2450,
+  "empty_instruction_ratio": 0.481920067667583,
+  "unique_scene_count": 1004
+}

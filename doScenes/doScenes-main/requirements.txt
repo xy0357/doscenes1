@@ -1,0 +1,6 @@
+﻿transformers==4.41.2
+numpy<2
+nuscenes-devkit
+pandas
+pyquaternion
+pytest>=8.0

@@ -1,0 +1,74 @@
+{
+  "best_checkpoint": "artifacts\\checkpoints\\baseline_best.pth",
+  "best_epoch": 4,
+  "best_val_ade": 0.33027267316628617,
+  "epochs_ran": 5,
+  "early_stop_patience": 3,
+  "final_gap_ade": 0.07696695836082329,
+  "max_gap_ade": 0.07696695836082329,
+  "gap_std": 0.04817695610358222,
+  "worsen_streak": 2.0,
+  "overfit_risk": "high",
+  "gpu_max_util": 0.8,
+  "gpu_poll_sec": 0.5,
+  "history": [
+    {
+      "epoch": 1.0,
+      "train_loss": 0.4405926417691254,
+      "train_ade": 0.441080278683265,
+      "train_fde": 0.9832166360986396,
+      "train_rank_loss": 0.010839615747924119,
+      "val_loss": 0.15812561562399646,
+      "val_ade": 0.3668631406315403,
+      "val_fde": 0.8496571615596892,
+      "gap_ade": -0.0742171380517247
+    },
+    {
+      "epoch": 2.0,
+      "train_loss": 0.3051543443962746,
+      "train_ade": 0.3626070153282855,
+      "train_fde": 0.847965720042958,
+      "train_rank_loss": 0.007358700764487028,
+      "val_loss": 0.1413072814018337,
+      "val_ade": 0.3512116116161326,
+      "val_fde": 0.8356923788783077,
+      "gap_ade": -0.011395403712152863
+    },
+    {
+      "epoch": 3.0,
+      "train_loss": 0.2921060222153846,
+      "train_ade": 0.3522967164099744,
+      "train_fde": 0.8305178909402937,
+      "train_rank_loss": 0.006216654400661356,
+      "val_loss": 0.1379497537148152,
+      "val_ade": 0.34014647895658295,
+      "val_fde": 0.8183708341029561,
+      "gap_ade": -0.012150237453391444
+    },
+    {
+      "epoch": 4.0,
+      "train_loss": 0.2700283224885491,
+      "train_ade": 0.33760243880825475,
+      "train_fde": 0.805610883108858,
+      "train_rank_loss": 0.005037624100444645,
+      "val_loss": 0.1306046711648971,
+      "val_ade": 0.33027267316628617,
+      "val_fde": 0.7920992464875686,
+      "gap_ade": -0.0073297656419685775
+    },
+    {
+      "epoch": 5.0,
+      "train_loss": 0.2635545196635042,
+      "train_ade": 0.3322810777241989,
+      "train_fde": 0.7964814741251359,
+      "train_rank_loss": 0.004917224298408659,
+      "val_loss": 0.17625608177293656,
+      "val_ade": 0.4092480360850222,
+      "val_fde": 0.9289189349221035,
+      "gap_ade": 0.07696695836082329
+    }
+  ],
+  "baseline_head_loss_weight": 1.0,
+  "rank_loss_weight": 0.7,
+  "rank_margin": 0.02
+}

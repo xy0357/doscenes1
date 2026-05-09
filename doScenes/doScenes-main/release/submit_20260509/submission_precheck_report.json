@@ -1,0 +1,12 @@
+{
+  "file": "artifacts\\submissions\\submission.csv",
+  "rows": 564,
+  "columns": 26,
+  "token_column": "sample_token",
+  "expected_steps": 12,
+  "duplicate_rows": 0,
+  "bad_rows": 0,
+  "invalid_numeric_cells": 0,
+  "ok": true,
+  "issues": []
+}

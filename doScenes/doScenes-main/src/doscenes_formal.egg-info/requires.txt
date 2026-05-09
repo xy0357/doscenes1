@@ -1,0 +1,9 @@
+torch
+transformers==4.41.2
+numpy<2
+nuscenes-devkit
+pandas
+pyquaternion
+
+[test]
+pytest>=8.0
