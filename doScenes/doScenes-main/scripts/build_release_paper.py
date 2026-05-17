@@ -198,7 +198,7 @@ def shade_cell(cell, fill: str) -> None:
     tc_pr.append(shd)
 
 
-def build_docx(blocks: list[Block], output_path: Path) -> None:
+def build_docx(blocks: list[Block], output_path: Path, author: str) -> None:
     doc = Document()
     configure_document_styles(doc)
 
@@ -221,13 +221,17 @@ def build_docx(blocks: list[Block], output_path: Path) -> None:
     meta_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     meta_run = meta_p.add_run("Prepared from project experiments and submission artifacts")
     set_run_font(meta_run, "Microsoft YaHei", 10, False, RGBColor(92, 101, 112))
+    author_p = doc.add_paragraph()
+    author_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    author_run = author_p.add_run(f"Author: {author}")
+    set_run_font(author_run, "Microsoft YaHei", 10.5, True, RGBColor(45, 62, 80))
 
     doc.add_paragraph()
     summary_box = doc.add_table(rows=2, cols=3)
     summary_box.style = "Table Grid"
     summary_box.autofit = True
-    labels = ["ADE_instruction", "ADE_baseline", "Delta ADE"]
-    values = ["0.341449", "0.371764", "+0.030314"]
+    labels = ["ADE_instruction (m)", "ADE_baseline (m)", "Delta ADE (m)"]
+    values = ["3.474533", "3.955950", "+0.481417"]
     for idx, label in enumerate(labels):
         cell = summary_box.rows[0].cells[idx]
         shade_cell(cell, "DCE6F1")
@@ -304,7 +308,7 @@ def build_docx(blocks: list[Block], output_path: Path) -> None:
     doc.save(output_path)
 
 
-def build_pdf(blocks: list[Block], output_path: Path) -> None:
+def build_pdf(blocks: list[Block], output_path: Path, author: str) -> None:
     pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
     styles = getSampleStyleSheet()
     styles.add(ParagraphStyle(name="BodyCN", parent=styles["BodyText"], fontName="STSong-Light", fontSize=10.5, leading=16, textColor=colors.HexColor("#222222"), alignment=TA_LEFT, spaceAfter=6))
@@ -325,12 +329,13 @@ def build_pdf(blocks: list[Block], output_path: Path) -> None:
     story.append(Paragraph(escape(title), styles["TitleCN"]))
     story.append(Paragraph("doScenes Challenge Language+History Track Technical Report", styles["SubTitleCN"]))
     story.append(Paragraph("Prepared from project experiments and submission artifacts", styles["SubTitleCN"]))
+    story.append(Paragraph(escape(f"Author: {author}"), styles["SubTitleCN"]))
     story.append(Spacer(1, 0.8 * cm))
 
     summary_table = Table(
         [
-            ["ADE_instruction", "ADE_baseline", "Delta ADE"],
-            ["0.341449", "0.371764", "+0.030314"],
+            ["ADE_instruction (m)", "ADE_baseline (m)", "Delta ADE (m)"],
+            ["3.474533", "3.955950", "+0.481417"],
         ],
         colWidths=[4.2 * cm, 4.2 * cm, 4.2 * cm],
         hAlign="CENTER",
@@ -397,7 +402,7 @@ def build_pdf(blocks: list[Block], output_path: Path) -> None:
             story.append(table)
             story.append(Spacer(1, 0.2 * cm))
 
-    doc = SimpleDocTemplate(str(output_path), pagesize=A4, leftMargin=2.4 * cm, rightMargin=2.2 * cm, topMargin=2.0 * cm, bottomMargin=2.0 * cm, title=title, author="OpenAI Codex")
+    doc = SimpleDocTemplate(str(output_path), pagesize=A4, leftMargin=2.4 * cm, rightMargin=2.2 * cm, topMargin=2.0 * cm, bottomMargin=2.0 * cm, title=title, author=author)
     doc.build(story)
 
 
@@ -406,14 +411,15 @@ def main() -> int:
     parser.add_argument("--input", type=Path, required=True, help="Input markdown paper path.")
     parser.add_argument("--docx", type=Path, required=True, help="Output DOCX path.")
     parser.add_argument("--pdf", type=Path, required=True, help="Output PDF path.")
+    parser.add_argument("--author", type=str, default="邓柯", help="Paper author name.")
     args = parser.parse_args()
 
     markdown = args.input.read_text(encoding="utf-8")
     blocks = parse_markdown(markdown)
     args.docx.parent.mkdir(parents=True, exist_ok=True)
     args.pdf.parent.mkdir(parents=True, exist_ok=True)
-    build_docx(list(blocks), args.docx)
-    build_pdf(list(blocks), args.pdf)
+    build_docx(list(blocks), args.docx, args.author)
+    build_pdf(list(blocks), args.pdf, args.author)
     return 0
 
 
