@@ -4,6 +4,8 @@
   "columns": 26,
   "token_column": "sample_token",
   "expected_steps": 12,
+  "coordinate_unit": "meters",
+  "coordinate_frame": "ego_vehicle_at_prediction_time",
   "duplicate_rows": 0,
   "bad_rows": 0,
   "invalid_numeric_cells": 0,

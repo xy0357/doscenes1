@@ -2,6 +2,7 @@
 
 import subprocess
 import time
+import math
 from pathlib import Path
 
 import torch
@@ -78,8 +79,16 @@ def build_loaders(cfg: AppConfig) -> tuple[DataLoader, DataLoader]:
         )
         train_shuffle = False
 
-    train_loader = DataLoader(train_subset, batch_size=cfg.training.batch_size, shuffle=train_shuffle, sampler=train_sampler, num_workers=cfg.data.num_workers, collate_fn=collate_batch)
-    val_loader = DataLoader(Subset(dataset, val_idx), batch_size=cfg.training.batch_size, shuffle=False, num_workers=cfg.data.num_workers, collate_fn=collate_batch)
+    loader_kwargs = {
+        "num_workers": cfg.data.num_workers,
+        "collate_fn": collate_batch,
+        "pin_memory": bool(cfg.data.pin_memory),
+    }
+    if cfg.data.num_workers > 0:
+        loader_kwargs["persistent_workers"] = bool(cfg.data.persistent_workers)
+
+    train_loader = DataLoader(train_subset, batch_size=cfg.training.batch_size, shuffle=train_shuffle, sampler=train_sampler, **loader_kwargs)
+    val_loader = DataLoader(Subset(dataset, val_idx), batch_size=cfg.training.batch_size, shuffle=False, **loader_kwargs)
     return train_loader, val_loader
 
 
@@ -99,7 +108,9 @@ def _assess_overfit(history: list[dict[str, float]]) -> tuple[str, dict[str, flo
     if not history:
         return "unknown", {"final_gap": 0.0, "max_gap": 0.0, "worsen_streak": 0.0, "gap_std": 0.0}
 
-    gaps = [float(x["gap_ade"]) for x in history]
+    gaps = [float(x["gap_ade"]) for x in history if math.isfinite(float(x.get("gap_ade", float("nan"))))]
+    if not gaps:
+        return "unknown", {"final_gap": 0.0, "max_gap": 0.0, "worsen_streak": 0.0, "gap_std": 0.0}
     final_gap = gaps[-1]
     max_gap = max(gaps)
 
@@ -128,9 +139,20 @@ def _assess_overfit(history: list[dict[str, float]]) -> tuple[str, dict[str, flo
 
 def train(cfg: AppConfig, show_progress: bool = True, log_interval: int = 20, gpu_max_util: float | None = None, gpu_poll_sec: float | None = None) -> Path:
     seed_everything(cfg.runtime.seed)
+    if getattr(cfg.runtime, "matmul_precision", "high") in {"high", "medium"}:
+        torch.set_float32_matmul_precision(cfg.runtime.matmul_precision)
     device = select_device(cfg.runtime.device)
     train_loader, val_loader = build_loaders(cfg)
     model = build_model(cfg, device)
+    use_amp = bool(getattr(cfg.runtime, "amp", False)) and device.type == "cuda"
+    if hasattr(torch, "amp") and hasattr(torch.amp, "GradScaler"):
+        scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
+        def _autocast_ctx():
+            return torch.amp.autocast("cuda", enabled=use_amp)
+    else:
+        scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
+        def _autocast_ctx():
+            return torch.cuda.amp.autocast(enabled=use_amp)
 
     max_util = cfg.runtime.gpu_max_util if gpu_max_util is None else gpu_max_util
     poll_sec = cfg.runtime.gpu_poll_sec if gpu_poll_sec is None else gpu_poll_sec
@@ -162,8 +184,11 @@ def train(cfg: AppConfig, show_progress: bool = True, log_interval: int = 20, gp
     )
     print(
         f"Dual-head loss weight: baseline_head_loss_weight={cfg.training.baseline_head_loss_weight}, "
-        f"rank_loss_weight={cfg.training.rank_loss_weight}, rank_margin={cfg.training.rank_margin}"
+        f"rank_loss_weight={cfg.training.rank_loss_weight}, rank_margin={cfg.training.rank_margin}, "
+        f"fde_loss_weight={cfg.training.fde_loss_weight}"
     )
+    print(f"Eval every N epochs: {cfg.training.eval_every_n_epochs}")
+    print(f"AMP enabled: {use_amp}")
     if device.type == "cuda":
         print(f"GPU throttle enabled: max_util={max_util * 100:.1f}% poll={poll_sec:.2f}s")
 
@@ -173,6 +198,7 @@ def train(cfg: AppConfig, show_progress: bool = True, log_interval: int = 20, gp
         epoch_ade_sum = 0.0
         epoch_fde_sum = 0.0
         epoch_rank_sum = 0.0
+        epoch_fde_loss_sum = 0.0
         seen_batches = 0
 
         iterator = train_loader
@@ -190,40 +216,54 @@ def train(cfg: AppConfig, show_progress: bool = True, log_interval: int = 20, gp
             instructions = batch["instruction"]
             has_instruction = batch["has_instruction"].to(device)
 
-            pred_inst = model(history_xy, instructions, head="instruction")
-            pred_base_full = model(history_xy, ["" for _ in instructions], head="baseline")
-            loss_main_inst = trajectory_loss_l2(pred_inst, future_xy_gt)
-            loss_main_base = trajectory_loss_l2(pred_base_full, future_xy_gt)
-            loss_main = loss_main_inst + cfg.training.baseline_head_loss_weight * loss_main_base
-            rank_loss = torch.tensor(0.0, device=device)
-            if cfg.training.rank_loss_weight > 0:
-                mask = has_instruction > 0
-                if bool(mask.any()):
-                    pred_inst_masked = pred_inst[mask]
-                    gt_inst = future_xy_gt[mask]
-                    pred_base = pred_base_full[mask]
-                    loss_inst = torch.norm(pred_inst_masked - gt_inst, dim=-1).mean(dim=-1)
-                    loss_base = torch.norm(pred_base - gt_inst, dim=-1).mean(dim=-1)
-                    rank_loss = F.relu(loss_inst - loss_base + cfg.training.rank_margin).mean()
+            with _autocast_ctx():
+                pred_inst = model(history_xy, instructions, head="instruction")
+                pred_base_full = model(history_xy, ["" for _ in instructions], head="baseline")
+                loss_main_inst = trajectory_loss_l2(pred_inst, future_xy_gt)
+                loss_main_base = trajectory_loss_l2(pred_base_full, future_xy_gt)
+                loss_main = loss_main_inst + cfg.training.baseline_head_loss_weight * loss_main_base
+                fde_loss = torch.tensor(0.0, device=device)
+                if cfg.training.fde_loss_weight > 0:
+                    fde_loss_inst = F.mse_loss(pred_inst[:, -1, :], future_xy_gt[:, -1, :])
+                    fde_loss_base = F.mse_loss(pred_base_full[:, -1, :], future_xy_gt[:, -1, :])
+                    fde_loss = fde_loss_inst + cfg.training.baseline_head_loss_weight * fde_loss_base
+                rank_loss = torch.tensor(0.0, device=device)
+                if cfg.training.rank_loss_weight > 0:
+                    mask = has_instruction > 0
+                    if bool(mask.any()):
+                        pred_inst_masked = pred_inst[mask]
+                        gt_inst = future_xy_gt[mask]
+                        pred_base = pred_base_full[mask]
+                        loss_inst = torch.norm(pred_inst_masked - gt_inst, dim=-1).mean(dim=-1)
+                        loss_base = torch.norm(pred_base - gt_inst, dim=-1).mean(dim=-1)
+                        rank_loss = F.relu(loss_inst - loss_base + cfg.training.rank_margin).mean()
 
-            loss = loss_main + cfg.training.rank_loss_weight * rank_loss
+                loss = loss_main + cfg.training.rank_loss_weight * rank_loss + cfg.training.fde_loss_weight * fde_loss
             ade, fde = ade_fde(pred_inst.detach(), future_xy_gt)
+            coord_scale = float(batch.get("coord_scale", 1.0))
+            ade_m = float(ade.item()) * coord_scale
+            fde_m = float(fde.item()) * coord_scale
 
             optimizer.zero_grad(set_to_none=True)
-            loss.backward()
+            scaler.scale(loss).backward()
             if cfg.training.grad_clip_norm > 0:
+                scaler.unscale_(optimizer)
                 torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.training.grad_clip_norm)
-            optimizer.step()
+            scaler.step(optimizer)
+            scaler.update()
 
             epoch_loss_sum += float(loss.item())
             epoch_ade_sum += float(ade.item())
             epoch_fde_sum += float(fde.item())
             epoch_rank_sum += float(rank_loss.item())
+            epoch_fde_loss_sum += float(fde_loss.item())
             seen_batches += 1
 
             if show_progress and tqdm is not None and hasattr(iterator, "set_postfix"):
-                postfix = {"loss": f"{loss.item():.4f}", "ade": f"{ade.item():.4f}", "fde": f"{fde.item():.4f}"}
+                postfix = {"loss": f"{loss.item():.4f}", "ade_m": f"{ade_m:.3f}", "fde_m": f"{fde_m:.3f}"}
                 postfix["rank"] = f"{rank_loss.item():.4f}"
+                if cfg.training.fde_loss_weight > 0:
+                    postfix["fdeL"] = f"{fde_loss.item():.4f}"
                 if gpu_util is not None:
                     postfix["gpu%"] = f"{gpu_util:.0f}"
                 iterator.set_postfix(**postfix)
@@ -231,23 +271,28 @@ def train(cfg: AppConfig, show_progress: bool = True, log_interval: int = 20, gp
             if log_interval > 0 and (step % log_interval == 0 or step == len(train_loader)):
                 util_text = f" gpu={gpu_util:.0f}%" if gpu_util is not None else ""
                 throttle_text = " throttled=1" if throttled else ""
-                print(f"[Epoch {epoch:03d}] step {step:04d}/{len(train_loader):04d} loss={loss.item():.4f} ade={ade.item():.4f} fde={fde.item():.4f} rank={rank_loss.item():.4f}{util_text}{throttle_text}")
+                print(f"[Epoch {epoch:03d}] step {step:04d}/{len(train_loader):04d} loss={loss.item():.4f} ade_m={ade_m:.3f} fde_m={fde_m:.3f} rank={rank_loss.item():.4f} fde_loss={fde_loss.item():.4f}{util_text}{throttle_text}")
 
         train_loss = epoch_loss_sum / max(1, seen_batches)
         train_ade = epoch_ade_sum / max(1, seen_batches)
         train_fde = epoch_fde_sum / max(1, seen_batches)
         train_rank = epoch_rank_sum / max(1, seen_batches)
+        train_fde_loss = epoch_fde_loss_sum / max(1, seen_batches)
 
-        val_metrics = evaluate_model(
-            model=model,
-            loader=val_loader,
-            device=device,
-            ignore_text=False,
-            head="instruction",
-            show_progress=show_progress,
-            log_prefix=f"Val {epoch:03d}",
-        )
-        gap_ade = float(val_metrics["ade"] - train_ade)
+        should_eval = (cfg.training.eval_every_n_epochs <= 1) or (epoch % cfg.training.eval_every_n_epochs == 0) or (epoch == cfg.training.epochs)
+        if should_eval:
+            val_metrics = evaluate_model(
+                model=model,
+                loader=val_loader,
+                device=device,
+                ignore_text=False,
+                head="instruction",
+                show_progress=show_progress,
+                log_prefix=f"Val {epoch:03d}",
+            )
+        else:
+            val_metrics = {"loss": float("nan"), "ade": float("nan"), "fde": float("nan"), "ade_norm": float("nan"), "fde_norm": float("nan")}
+        gap_ade = float(val_metrics["ade_norm"] - train_ade) if should_eval else float("nan")
 
         history.append({
             "epoch": float(epoch),
@@ -255,24 +300,33 @@ def train(cfg: AppConfig, show_progress: bool = True, log_interval: int = 20, gp
             "train_ade": train_ade,
             "train_fde": train_fde,
             "train_rank_loss": train_rank,
+            "train_fde_loss": train_fde_loss,
             "val_loss": float(val_metrics["loss"]),
-            "val_ade": float(val_metrics["ade"]),
-            "val_fde": float(val_metrics["fde"]),
+            "val_ade_m": float(val_metrics["ade"]) if should_eval else float("nan"),
+            "val_fde_m": float(val_metrics["fde"]) if should_eval else float("nan"),
+            "val_ade_norm": float(val_metrics["ade_norm"]) if should_eval else float("nan"),
+            "val_fde_norm": float(val_metrics["fde_norm"]) if should_eval else float("nan"),
             "gap_ade": gap_ade,
         })
 
-        print(
-            f"Epoch {epoch:03d} summary | train_ADE={train_ade:.4f} "
-            f"val_ADE={val_metrics['ade']:.4f} gap_ADE={gap_ade:+.4f} rank_loss={train_rank:.4f}"
-        )
+        if should_eval:
+            print(
+                f"Epoch {epoch:03d} summary | train_ADE_m={train_ade * cfg.data.coord_scale:.3f} "
+                f"val_ADE_m={val_metrics['ade']:.3f} gap_ADE_norm={gap_ade:+.4f} rank_loss={train_rank:.4f}"
+            )
+        else:
+            print(
+                f"Epoch {epoch:03d} summary | train_ADE_m={train_ade * cfg.data.coord_scale:.3f} "
+                f"val=skipped rank_loss={train_rank:.4f}"
+            )
 
-        if val_metrics["ade"] < (best_ade - cfg.training.early_stop_min_delta):
+        if should_eval and (val_metrics["ade"] < (best_ade - cfg.training.early_stop_min_delta)):
             best_ade = float(val_metrics["ade"])
             best_epoch = epoch
             stale_epochs = 0
-            torch.save({"epoch": epoch, "model_state_dict": model.state_dict(), "optimizer_state_dict": optimizer.state_dict(), "best_val_ade": best_ade, "config": cfg.to_dict()}, ckpt_path)
+            torch.save({"epoch": epoch, "model_state_dict": model.state_dict(), "optimizer_state_dict": optimizer.state_dict(), "best_val_ade_m": best_ade, "config": cfg.to_dict()}, ckpt_path)
             print(f"Saved best checkpoint: {ckpt_path}")
-        else:
+        elif should_eval:
             stale_epochs += 1
 
         if cfg.training.early_stop_patience > 0 and stale_epochs >= cfg.training.early_stop_patience:
@@ -285,6 +339,8 @@ def train(cfg: AppConfig, show_progress: bool = True, log_interval: int = 20, gp
         "best_checkpoint": str(ckpt_path),
         "best_epoch": best_epoch,
         "best_val_ade": best_ade,
+        "best_val_ade_m": best_ade,
+        "best_val_ade_norm": (best_ade / cfg.data.coord_scale) if cfg.data.coord_scale > 0 else best_ade,
         "epochs_ran": len(history),
         "early_stop_patience": cfg.training.early_stop_patience,
         "final_gap_ade": risk_stats["final_gap"],
@@ -298,6 +354,7 @@ def train(cfg: AppConfig, show_progress: bool = True, log_interval: int = 20, gp
         "baseline_head_loss_weight": cfg.training.baseline_head_loss_weight,
         "rank_loss_weight": cfg.training.rank_loss_weight,
         "rank_margin": cfg.training.rank_margin,
+        "fde_loss_weight": cfg.training.fde_loss_weight,
     }
     write_json(report_path, report)
     print(f"Saved train report: {report_path}")

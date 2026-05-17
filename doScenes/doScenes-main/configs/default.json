@@ -7,43 +7,49 @@
     "relative_coords": true,
     "align_heading": true,
     "coord_scale": 10.0,
-    "window_stride": 2,
+    "window_stride": 3,
     "val_ratio": 0.2,
     "split_seed": 42,
     "num_workers": 0,
+    "pin_memory": false,
+    "persistent_workers": false,
     "keep_empty_instruction": true,
     "rebalance_non_empty_instruction": true,
-    "non_empty_instruction_weight": 2.5
+    "non_empty_instruction_weight": 2.0
   },
   "model": {
     "text_model_name": "../models/distilbert-base-uncased",
-    "hidden_dim": 256,
+    "hidden_dim": 192,
     "pred_steps": 12,
     "freeze_text_encoder": true,
     "text_unfreeze_last_n_layers": 2,
     "local_files_only": true,
-    "attention_heads": 4
+    "attention_heads": 2
   },
   "training": {
     "run_name": "baseline",
-    "epochs": 5,
-    "batch_size": 8,
-    "lr": 0.001,
+    "epochs": 10,
+    "batch_size": 16,
+    "lr": 0.0005,
     "weight_decay": 0.0001,
-    "grad_clip_norm": 0.0,
+    "grad_clip_norm": 1.0,
     "checkpoint_dir": "artifacts/checkpoints",
     "checkpoint_name": "baseline_best.pth",
     "report_dir": "artifacts/experiments",
-    "early_stop_patience": 3,
+    "early_stop_patience": 4,
     "early_stop_min_delta": 0.0,
+    "eval_every_n_epochs": 2,
     "baseline_head_loss_weight": 1.0,
-    "rank_loss_weight": 0.7,
-    "rank_margin": 0.02
+    "rank_loss_weight": 0.5,
+    "rank_margin": 0.01,
+    "fde_loss_weight": 0.02
   },
   "runtime": {
     "seed": 42,
     "device": "auto",
     "gpu_max_util": 0.8,
-    "gpu_poll_sec": 0.5
+    "gpu_poll_sec": 0.5,
+    "amp": true,
+    "matmul_precision": "high"
   }
 }

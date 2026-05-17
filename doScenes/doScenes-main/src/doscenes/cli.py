@@ -46,6 +46,10 @@ def cmd_compare(args: argparse.Namespace) -> int:
     base = __import__("json").loads(Path(args.baseline).read_text(encoding="utf-8-sig"))
     inst = __import__("json").loads(Path(args.instruction).read_text(encoding="utf-8-sig"))
     payload = {"baseline": base, "instruction": inst, "delta_ade": metric_delta(base["ade"], inst["ade"]), "delta_fde": float(base["fde"] - inst["fde"])}
+    if "ade_m" in base and "ade_m" in inst:
+        payload["delta_ade_m"] = metric_delta(base["ade_m"], inst["ade_m"])
+    if "fde_m" in base and "fde_m" in inst:
+        payload["delta_fde_m"] = float(base["fde_m"] - inst["fde_m"])
     write_json(args.output, payload)
     print(f"Saved delta report: {args.output}")
     return 0
@@ -83,14 +87,46 @@ def cmd_benchmark(args: argparse.Namespace) -> int:
         )
         delta_ade = metric_delta(float(baseline["ade"]), float(instruction["ade"]))
         delta_fde = float(baseline["fde"] - instruction["fde"])
+        delta_ade_m = metric_delta(float(baseline["ade_m"]), float(instruction["ade_m"]))
+        delta_fde_m = float(baseline["fde_m"] - instruction["fde_m"])
 
-        results.append({"seed": float(seed), "ade_instruction": float(instruction["ade"]), "fde_instruction": float(instruction["fde"]), "ade_baseline": float(baseline["ade"]), "fde_baseline": float(baseline["fde"]), "delta_ade": delta_ade, "delta_fde": delta_fde})
+        results.append({
+            "seed": float(seed),
+            "ade_instruction": float(instruction["ade"]),
+            "fde_instruction": float(instruction["fde"]),
+            "ade_baseline": float(baseline["ade"]),
+            "fde_baseline": float(baseline["fde"]),
+            "delta_ade": delta_ade,
+            "delta_fde": delta_fde,
+            "ade_instruction_m": float(instruction["ade_m"]),
+            "fde_instruction_m": float(instruction["fde_m"]),
+            "ade_baseline_m": float(baseline["ade_m"]),
+            "fde_baseline_m": float(baseline["fde_m"]),
+            "delta_ade_m": delta_ade_m,
+            "delta_fde_m": delta_fde_m,
+        })
 
     def mean_std(key: str) -> dict[str, float]:
         vals = [x[key] for x in results]
         return {"mean": float(statistics.mean(vals)), "std": float(statistics.pstdev(vals)) if len(vals) > 1 else 0.0}
 
-    summary = {"runs": results, "summary": {"ade_instruction": mean_std("ade_instruction"), "fde_instruction": mean_std("fde_instruction"), "ade_baseline": mean_std("ade_baseline"), "fde_baseline": mean_std("fde_baseline"), "delta_ade": mean_std("delta_ade"), "delta_fde": mean_std("delta_fde")}}
+    summary = {
+        "runs": results,
+        "summary": {
+            "ade_instruction": mean_std("ade_instruction"),
+            "fde_instruction": mean_std("fde_instruction"),
+            "ade_baseline": mean_std("ade_baseline"),
+            "fde_baseline": mean_std("fde_baseline"),
+            "delta_ade": mean_std("delta_ade"),
+            "delta_fde": mean_std("delta_fde"),
+            "ade_instruction_m": mean_std("ade_instruction_m"),
+            "fde_instruction_m": mean_std("fde_instruction_m"),
+            "ade_baseline_m": mean_std("ade_baseline_m"),
+            "fde_baseline_m": mean_std("fde_baseline_m"),
+            "delta_ade_m": mean_std("delta_ade_m"),
+            "delta_fde_m": mean_std("delta_fde_m"),
+        },
+    }
     write_json(args.output, summary)
     print(f"Saved benchmark report: {args.output}")
     return 0
@@ -150,6 +186,7 @@ def cmd_export_submission(args: argparse.Namespace) -> int:
             history_xy = batch["history_xy"].to(device)
             instructions = ["" for _ in batch["instruction"]] if args.ignore_text else batch["instruction"]
             pred = model(history_xy, instructions, head="instruction").cpu()
+            pred = pred * float(batch.get("coord_scale", 1.0))
             batch_tokens = batch.get("scene_token", batch["sample_id"])
             sample_tokens.extend(batch_tokens)
             instructions_all.extend(batch["instruction"])

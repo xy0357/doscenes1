@@ -19,6 +19,8 @@ class DataConfig:
     val_ratio: float = 0.2
     split_seed: int = 42
     num_workers: int = 0
+    pin_memory: bool = True
+    persistent_workers: bool = True
     keep_empty_instruction: bool = True
     rebalance_non_empty_instruction: bool = True
     non_empty_instruction_weight: float = 2.0
@@ -48,9 +50,11 @@ class TrainingConfig:
     report_dir: str = "artifacts/experiments"
     early_stop_patience: int = 3
     early_stop_min_delta: float = 0.0
+    eval_every_n_epochs: int = 1
     baseline_head_loss_weight: float = 1.0
     rank_loss_weight: float = 0.5
     rank_margin: float = 0.01
+    fde_loss_weight: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -59,6 +63,8 @@ class RuntimeConfig:
     device: str = "auto"
     gpu_max_util: float = 0.8
     gpu_poll_sec: float = 0.5
+    amp: bool = True
+    matmul_precision: str = "high"
 
 
 @dataclass(frozen=True)

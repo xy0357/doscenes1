@@ -23,9 +23,9 @@ def language_effect_report(
 
     rows: list[dict[str, Any]] = []
     grouped = {
-        "all": {"count": 0, "ade_inst": 0.0, "fde_inst": 0.0, "ade_base": 0.0, "fde_base": 0.0},
-        "has_instruction": {"count": 0, "ade_inst": 0.0, "fde_inst": 0.0, "ade_base": 0.0, "fde_base": 0.0},
-        "empty_instruction": {"count": 0, "ade_inst": 0.0, "fde_inst": 0.0, "ade_base": 0.0, "fde_base": 0.0},
+        "all": {"count": 0, "ade_inst": 0.0, "fde_inst": 0.0, "ade_base": 0.0, "fde_base": 0.0, "ade_inst_m": 0.0, "fde_inst_m": 0.0, "ade_base_m": 0.0, "fde_base_m": 0.0},
+        "has_instruction": {"count": 0, "ade_inst": 0.0, "fde_inst": 0.0, "ade_base": 0.0, "fde_base": 0.0, "ade_inst_m": 0.0, "fde_inst_m": 0.0, "ade_base_m": 0.0, "fde_base_m": 0.0},
+        "empty_instruction": {"count": 0, "ade_inst": 0.0, "fde_inst": 0.0, "ade_base": 0.0, "fde_base": 0.0, "ade_inst_m": 0.0, "fde_inst_m": 0.0, "ade_base_m": 0.0, "fde_base_m": 0.0},
     }
 
     for batch in loader:
@@ -33,6 +33,7 @@ def language_effect_report(
         future_xy_gt = batch["future_xy_gt"].to(device)
         instructions = batch["instruction"]
         has_instruction = batch.get("has_instruction")
+        coord_scale = float(batch.get("coord_scale", 1.0))
         if has_instruction is None:
             has_instruction = torch.tensor([1 if str(x).strip() else 0 for x in instructions], dtype=torch.long)
 
@@ -56,17 +57,27 @@ def language_effect_report(
             fb = float(fde_base_per[i].item())
             da = ab - ai
             df = fb - fi
+            ai_m = ai * coord_scale
+            fi_m = fi * coord_scale
+            ab_m = ab * coord_scale
+            fb_m = fb * coord_scale
 
             rows.append(
                 {
                     "sample_id": sid,
                     "has_instruction": flag,
-                    "ade_instruction": ai,
-                    "fde_instruction": fi,
-                    "ade_baseline": ab,
-                    "fde_baseline": fb,
-                    "delta_ade": da,
-                    "delta_fde": df,
+                    "ade_instruction_m": ai_m,
+                    "fde_instruction_m": fi_m,
+                    "ade_baseline_m": ab_m,
+                    "fde_baseline_m": fb_m,
+                    "delta_ade_m": ab_m - ai_m,
+                    "delta_fde_m": fb_m - fi_m,
+                    "ade_instruction_norm": ai,
+                    "fde_instruction_norm": fi,
+                    "ade_baseline_norm": ab,
+                    "fde_baseline_norm": fb,
+                    "delta_ade_norm": da,
+                    "delta_fde_norm": df,
                 }
             )
 
@@ -76,6 +87,10 @@ def language_effect_report(
                 grouped[key]["fde_inst"] += fi
                 grouped[key]["ade_base"] += ab
                 grouped[key]["fde_base"] += fb
+                grouped[key]["ade_inst_m"] += ai_m
+                grouped[key]["fde_inst_m"] += fi_m
+                grouped[key]["ade_base_m"] += ab_m
+                grouped[key]["fde_base_m"] += fb_m
 
     def finalize(g: dict[str, float]) -> dict[str, float]:
         n = max(1, int(g["count"]))
@@ -83,14 +98,30 @@ def language_effect_report(
         fde_i = g["fde_inst"] / n
         ade_b = g["ade_base"] / n
         fde_b = g["fde_base"] / n
+        ade_i_m = g["ade_inst_m"] / n
+        fde_i_m = g["fde_inst_m"] / n
+        ade_b_m = g["ade_base_m"] / n
+        fde_b_m = g["fde_base_m"] / n
         return {
             "count": int(g["count"]),
-            "ade_instruction": ade_i,
-            "fde_instruction": fde_i,
-            "ade_baseline": ade_b,
-            "fde_baseline": fde_b,
-            "delta_ade": metric_delta(ade_b, ade_i),
-            "delta_fde": float(fde_b - fde_i),
+            "ade_instruction": ade_i_m,
+            "fde_instruction": fde_i_m,
+            "ade_baseline": ade_b_m,
+            "fde_baseline": fde_b_m,
+            "delta_ade": metric_delta(ade_b_m, ade_i_m),
+            "delta_fde": float(fde_b_m - fde_i_m),
+            "ade_instruction_m": ade_i_m,
+            "fde_instruction_m": fde_i_m,
+            "ade_baseline_m": ade_b_m,
+            "fde_baseline_m": fde_b_m,
+            "delta_ade_m": metric_delta(ade_b_m, ade_i_m),
+            "delta_fde_m": float(fde_b_m - fde_i_m),
+            "ade_instruction_norm": ade_i,
+            "fde_instruction_norm": fde_i,
+            "ade_baseline_norm": ade_b,
+            "fde_baseline_norm": fde_b,
+            "delta_ade_norm": metric_delta(ade_b, ade_i),
+            "delta_fde_norm": float(fde_b - fde_i),
         }
 
     report = {
@@ -188,6 +219,8 @@ def precheck_submission_csv(
         "columns": len(header),
         "token_column": token_col,
         "expected_steps": expected_steps,
+        "coordinate_unit": "meters",
+        "coordinate_frame": "ego_vehicle_at_prediction_time",
         "duplicate_rows": dup,
         "bad_rows": bad_rows,
         "invalid_numeric_cells": nan_cells,

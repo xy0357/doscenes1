@@ -24,6 +24,8 @@ def evaluate_model(
     model.eval()
     total_ade = 0.0
     total_fde = 0.0
+    total_ade_m = 0.0
+    total_fde_m = 0.0
     total_loss = 0.0
     count = 0
 
@@ -39,11 +41,14 @@ def evaluate_model(
         pred = model(history_xy, instructions, head=head)
         loss = trajectory_loss_l2(pred, future_xy_gt)
         ade, fde = ade_fde(pred, future_xy_gt)
+        coord_scale = float(batch.get("coord_scale", 1.0))
 
         bs = history_xy.size(0)
         total_loss += float(loss.item()) * bs
         total_ade += float(ade.item()) * bs
         total_fde += float(fde.item()) * bs
+        total_ade_m += float(ade.item()) * coord_scale * bs
+        total_fde_m += float(fde.item()) * coord_scale * bs
         count += bs
 
         if show_progress and tqdm is not None and hasattr(iterator, "set_postfix"):
@@ -55,6 +60,10 @@ def evaluate_model(
     return {
         "samples": count,
         "loss": total_loss / count,
-        "ade": total_ade / count,
-        "fde": total_fde / count,
+        "ade": total_ade_m / count,
+        "fde": total_fde_m / count,
+        "ade_m": total_ade_m / count,
+        "fde_m": total_fde_m / count,
+        "ade_norm": total_ade / count,
+        "fde_norm": total_fde / count,
     }
