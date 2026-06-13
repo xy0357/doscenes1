@@ -150,6 +150,7 @@ def precheck_submission_csv(
     submission_csv: str,
     expected_steps: int = 12,
     expected_rows: int | None = None,
+    expected_tokens_file: str | None = None,
     out_json: str | None = None,
 ) -> dict[str, Any]:
     path = Path(submission_csv)
@@ -206,6 +207,46 @@ def precheck_submission_csv(
     if expected_rows is not None and len(data) != expected_rows:
         issues.append(f"Row count {len(data)} != expected {expected_rows}")
 
+    expected_tokens: list[str] | None = None
+    if expected_tokens_file is not None:
+        expected_path = Path(expected_tokens_file)
+        if not expected_path.exists():
+            issues.append(f"Expected tokens file not found: {expected_path}")
+        else:
+            if expected_path.suffix.lower() == ".json":
+                payload = json.loads(expected_path.read_text(encoding="utf-8-sig"))
+                if isinstance(payload, dict):
+                    vals = payload.get("scene_tokens") or payload.get("sample_tokens") or []
+                    expected_tokens = [str(x).strip() for x in vals if str(x).strip()]
+                elif isinstance(payload, list):
+                    expected_tokens = [str(x).strip() for x in payload if str(x).strip()]
+                else:
+                    expected_tokens = []
+            else:
+                with expected_path.open("r", encoding="utf-8-sig", newline="") as f:
+                    first_line = f.readline()
+                    f.seek(0)
+                    if "," in first_line:
+                        reader = csv.DictReader(f)
+                        fieldnames = reader.fieldnames or []
+                        token_col = "scene_token" if "scene_token" in fieldnames else "sample_token"
+                        expected_tokens = []
+                        for row in reader:
+                            v = str(row.get(token_col, "")).strip()
+                            if v:
+                                expected_tokens.append(v)
+                    else:
+                        expected_tokens = [x.strip() for x in f.readlines() if x.strip() and not x.strip().startswith("#")]
+            if expected_tokens is not None:
+                expected_set = set(expected_tokens)
+                actual_set = {r[0] for r in data if len(r) > 0}
+                missing = expected_set - actual_set
+                extra = actual_set - expected_set
+                if missing:
+                    issues.append(f"Missing sample_token(s): {len(missing)}")
+                if extra:
+                    issues.append(f"Unexpected sample_token(s): {len(extra)}")
+
     if dup > 0:
         issues.append(f"Duplicate token rows: {dup}")
     if bad_rows > 0:
@@ -221,6 +262,8 @@ def precheck_submission_csv(
         "expected_steps": expected_steps,
         "coordinate_unit": "meters",
         "coordinate_frame": "ego_vehicle_at_prediction_time",
+        "expected_tokens_file": expected_tokens_file,
+        "expected_token_count": len(expected_tokens) if expected_tokens is not None else None,
         "duplicate_rows": dup,
         "bad_rows": bad_rows,
         "invalid_numeric_cells": nan_cells,

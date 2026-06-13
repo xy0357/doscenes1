@@ -35,6 +35,7 @@ class ModelConfig:
     local_files_only: bool = False
     attention_heads: int = 4
     text_unfreeze_last_n_layers: int = 0
+    future_decoder_type: str = "mlp"
 
 
 @dataclass(frozen=True)
@@ -55,6 +56,7 @@ class TrainingConfig:
     rank_loss_weight: float = 0.5
     rank_margin: float = 0.01
     fde_loss_weight: float = 0.0
+    init_checkpoint: str | None = None
 
 
 @dataclass(frozen=True)

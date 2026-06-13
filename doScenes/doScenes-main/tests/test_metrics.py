@@ -1,4 +1,6 @@
-﻿from doscenes.evaluation.metrics import metric_delta
+import pytest
+
+from doscenes.evaluation.metrics import metric_delta
 
 
 def test_metric_delta_positive_when_instruction_better() -> None:
@@ -6,4 +8,4 @@ def test_metric_delta_positive_when_instruction_better() -> None:
 
 
 def test_metric_delta_negative_when_instruction_worse() -> None:
-    assert metric_delta(0.31, 0.40) == -0.09
+    assert metric_delta(0.31, 0.40) == pytest.approx(-0.09)

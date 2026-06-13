@@ -101,7 +101,46 @@ def build_model(cfg: AppConfig, device: torch.device) -> TrajectoryTextModel:
         local_files_only=cfg.model.local_files_only,
         attention_heads=cfg.model.attention_heads,
         text_unfreeze_last_n_layers=cfg.model.text_unfreeze_last_n_layers,
+        future_decoder_type=cfg.model.future_decoder_type,
     ).to(device)
+
+
+def _maybe_load_init_checkpoint(model: torch.nn.Module, device: torch.device, checkpoint_path: str | None) -> Path | None:
+    if not checkpoint_path:
+        return None
+
+    init_path = Path(checkpoint_path)
+    if not init_path.exists():
+        raise FileNotFoundError(f"Init checkpoint not found: {init_path}")
+
+    payload = torch.load(init_path, map_location=device)
+    state = payload.get("model_state_dict")
+    if not isinstance(state, dict):
+        raise ValueError(f"Checkpoint missing model_state_dict: {init_path}")
+
+    model_state = model.state_dict()
+    loadable_state = {
+        key: tensor
+        for key, tensor in state.items()
+        if key in model_state and model_state[key].shape == tensor.shape
+    }
+    skipped_shape = sorted(
+        key
+        for key, tensor in state.items()
+        if key in model_state and model_state[key].shape != tensor.shape
+    )
+    unexpected = sorted(key for key in state.keys() if key not in model_state)
+
+    missing, unexpected_after = model.load_state_dict(loadable_state, strict=False)
+    if loadable_state:
+        print(f"Warm-start loaded tensors: {len(loadable_state)}")
+    if skipped_shape:
+        print(f"Warm-start skipped shape-mismatch tensors: {len(skipped_shape)}")
+    if missing:
+        print(f"Warm-start missing tensors after filtered load: {len(missing)}")
+    if unexpected or unexpected_after:
+        print(f"Warm-start unexpected tensors: {len(set(unexpected).union(unexpected_after))}")
+    return init_path
 
 
 def _assess_overfit(history: list[dict[str, float]]) -> tuple[str, dict[str, float]]:
@@ -137,6 +176,14 @@ def _assess_overfit(history: list[dict[str, float]]) -> tuple[str, dict[str, flo
     return level, {"final_gap": final_gap, "max_gap": max_gap, "worsen_streak": float(best_streak), "gap_std": gap_std}
 
 
+def _should_run_baseline_branch(cfg: AppConfig) -> bool:
+    return (
+        float(cfg.training.baseline_head_loss_weight) > 0.0
+        or float(cfg.training.rank_loss_weight) > 0.0
+        or float(cfg.training.fde_loss_weight) > 0.0
+    )
+
+
 def train(cfg: AppConfig, show_progress: bool = True, log_interval: int = 20, gpu_max_util: float | None = None, gpu_poll_sec: float | None = None) -> Path:
     seed_everything(cfg.runtime.seed)
     if getattr(cfg.runtime, "matmul_precision", "high") in {"high", "medium"}:
@@ -144,6 +191,7 @@ def train(cfg: AppConfig, show_progress: bool = True, log_interval: int = 20, gp
     device = select_device(cfg.runtime.device)
     train_loader, val_loader = build_loaders(cfg)
     model = build_model(cfg, device)
+    init_ckpt = _maybe_load_init_checkpoint(model, device, cfg.training.init_checkpoint)
     use_amp = bool(getattr(cfg.runtime, "amp", False)) and device.type == "cuda"
     if hasattr(torch, "amp") and hasattr(torch.amp, "GradScaler"):
         scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
@@ -171,22 +219,31 @@ def train(cfg: AppConfig, show_progress: bool = True, log_interval: int = 20, gp
     report_path = report_dir / "train_report.json"
 
     history: list[dict[str, float]] = []
+    use_baseline_branch = _should_run_baseline_branch(cfg)
 
     print(f"Device: {device}")
     print(f"Train batches: {len(train_loader)} | Val batches: {len(val_loader)}")
+    print(
+        f"Metric scale: coord_scale={cfg.data.coord_scale} | "
+        "primary_train_log=ADE_m/FDE_m | secondary_report=ADE_norm/FDE_norm"
+    )
     print(
         f"Rebalance non-empty instruction: {cfg.data.rebalance_non_empty_instruction} "
         f"(weight={cfg.data.non_empty_instruction_weight})"
     )
     print(
         f"Text encoder freeze={cfg.model.freeze_text_encoder}, "
-        f"unfreeze_last_n_layers={cfg.model.text_unfreeze_last_n_layers}"
+        f"unfreeze_last_n_layers={cfg.model.text_unfreeze_last_n_layers}, "
+        f"future_decoder_type={cfg.model.future_decoder_type}"
     )
     print(
         f"Dual-head loss weight: baseline_head_loss_weight={cfg.training.baseline_head_loss_weight}, "
         f"rank_loss_weight={cfg.training.rank_loss_weight}, rank_margin={cfg.training.rank_margin}, "
         f"fde_loss_weight={cfg.training.fde_loss_weight}"
     )
+    print(f"Baseline branch active: {use_baseline_branch}")
+    if init_ckpt is not None:
+        print(f"Warm-start checkpoint: {init_ckpt}")
     print(f"Eval every N epochs: {cfg.training.eval_every_n_epochs}")
     print(f"AMP enabled: {use_amp}")
     if device.type == "cuda":
@@ -218,17 +275,23 @@ def train(cfg: AppConfig, show_progress: bool = True, log_interval: int = 20, gp
 
             with _autocast_ctx():
                 pred_inst = model(history_xy, instructions, head="instruction")
-                pred_base_full = model(history_xy, ["" for _ in instructions], head="baseline")
+                pred_base_full = None
+                if use_baseline_branch:
+                    pred_base_full = model(history_xy, ["" for _ in instructions], head="baseline")
+
                 loss_main_inst = trajectory_loss_l2(pred_inst, future_xy_gt)
-                loss_main_base = trajectory_loss_l2(pred_base_full, future_xy_gt)
-                loss_main = loss_main_inst + cfg.training.baseline_head_loss_weight * loss_main_base
+                loss_main = loss_main_inst
+                if pred_base_full is not None and cfg.training.baseline_head_loss_weight > 0:
+                    loss_main_base = trajectory_loss_l2(pred_base_full, future_xy_gt)
+                    loss_main = loss_main + cfg.training.baseline_head_loss_weight * loss_main_base
+
                 fde_loss = torch.tensor(0.0, device=device)
-                if cfg.training.fde_loss_weight > 0:
+                if cfg.training.fde_loss_weight > 0 and pred_base_full is not None:
                     fde_loss_inst = F.mse_loss(pred_inst[:, -1, :], future_xy_gt[:, -1, :])
                     fde_loss_base = F.mse_loss(pred_base_full[:, -1, :], future_xy_gt[:, -1, :])
                     fde_loss = fde_loss_inst + cfg.training.baseline_head_loss_weight * fde_loss_base
                 rank_loss = torch.tensor(0.0, device=device)
-                if cfg.training.rank_loss_weight > 0:
+                if cfg.training.rank_loss_weight > 0 and pred_base_full is not None:
                     mask = has_instruction > 0
                     if bool(mask.any()):
                         pred_inst_masked = pred_inst[mask]
@@ -367,5 +430,24 @@ def load_checkpoint_for_eval(cfg: AppConfig, checkpoint: str) -> tuple[torch.nn.
     _, val_loader = build_loaders(cfg)
     model = build_model(cfg, device)
     payload = torch.load(checkpoint, map_location=device)
-    model.load_state_dict(payload["model_state_dict"])
+    state = payload["model_state_dict"]
+    model_state = model.state_dict()
+    loadable_state = {
+        key: tensor
+        for key, tensor in state.items()
+        if key in model_state and model_state[key].shape == tensor.shape
+    }
+    skipped_shape = sorted(
+        key
+        for key, tensor in state.items()
+        if key in model_state and model_state[key].shape != tensor.shape
+    )
+    unexpected = sorted(key for key in state.keys() if key not in model_state)
+    missing, unexpected_after = model.load_state_dict(loadable_state, strict=False)
+    if skipped_shape:
+        print(f"Eval load skipped shape-mismatch tensors: {len(skipped_shape)}")
+    if missing:
+        print(f"Eval load missing tensors after filtered load: {len(missing)}")
+    if unexpected or unexpected_after:
+        print(f"Eval load unexpected tensors: {len(set(unexpected).union(unexpected_after))}")
     return model, val_loader, device
