@@ -1,2 +1,36 @@
+﻿# Datasets and large local assets
 doScenes/v1.0-trainval/
+doScenes/v1.0-test/
+doScenes/doScenes_official/
 doScenes/distilbert-base-uncased.tar.gz
+
+# Keep only the repository-level README as public Markdown
+*.md
+!/README.md
+
+# Personal/generated document artifacts
+*.doc
+*.docx
+*.pdf
+*.ppt
+*.pptx
+*.xls
+*.xlsx
+~$*
+*_outputs/
+*_output/
+tmp_*_render/
+
+# Local runtime artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.log
+*.tmp
+doScenes/doScenes-main/artifacts/checkpoints/
+doScenes/doScenes-main/artifacts/weights/
+doScenes/models/distilbert-base-uncased/.cache/
+
+doScenes/.v1.0-test_meta.txt
+doScenes/.v1.0-trainval_meta.txt
+

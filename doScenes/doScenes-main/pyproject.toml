@@ -1,4 +1,4 @@
-[build-system]
+﻿[build-system]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "doscenes-formal"
 version = "2.0.0"
 description = "Formalized doScenes training/evaluation toolkit"
-readme = "README.md"
+readme = {text = "Formalized doScenes training/evaluation toolkit.", content-type = "text/plain"}
 requires-python = ">=3.10"
 dependencies = [
   "torch",
@@ -25,3 +25,4 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
